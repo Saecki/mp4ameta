@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 use std::ops::{Deref, DerefMut};
 
 /// (`ftyp`) Identifier of an atom information about the filetype.
@@ -229,13 +229,21 @@ impl Ident for Fourcc {
 
 impl fmt::Debug for Fourcc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Fourcc({})", self.0.iter().map(|b| char::from(*b)).collect::<String>())
+        f.write_str("Fourcc(")?;
+        for c in self.0.iter().map(|b| char::from(*b)) {
+            f.write_char(c)?;
+        }
+        f.write_str(")")?;
+        Ok(())
     }
 }
 
 impl fmt::Display for Fourcc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.iter().map(|b| char::from(*b)).collect::<String>())
+        for c in self.0.iter().map(|b| char::from(*b)) {
+            f.write_char(c)?;
+        }
+        Ok(())
     }
 }
 
