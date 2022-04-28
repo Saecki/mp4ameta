@@ -226,7 +226,7 @@ fn assert_tag_3(tag: &Tag) {
 }
 
 fn assert_readonly(tag: &Tag) {
-    assert_eq!(tag.duration(), Duration::from_secs_f64(0.486));
+    assert_eq!(tag.duration(), Duration::from_millis(486));
     assert_eq!(tag.filetype(), "M4A \u{0}\u{0}\u{2}\u{0}isomiso2");
     assert_eq!(tag.channel_config(), Some(ChannelConfig::Mono));
     assert_eq!(tag.sample_rate(), Some(SampleRate::Hz44100));
