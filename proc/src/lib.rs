@@ -45,7 +45,7 @@ pub fn single_string_value_accessor(input: TokenStream) -> TokenStream {
     format!(
         "
 /// ### {hl}
-impl Tag {{
+impl Userdata {{
     /// Returns the {n} (`{ais}`).
     pub fn {vi}(&self) -> Option<&str> {{
         self.strings_of(&{ai}).next()
@@ -67,7 +67,7 @@ impl Tag {{
     }}
 
     /// Returns the {n} formatted in an easily readable way.
-    fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
+    pub(crate) fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
         match self.{vi}() {{
             Some(s) => writeln!(f, \"{n}: {{}}\", s),
             None => Ok(()),
@@ -102,7 +102,7 @@ pub fn multiple_string_values_accessor(input: TokenStream) -> TokenStream {
     format!(
         "
 /// ### {hl}
-impl Tag {{
+impl Userdata {{
     /// Returns all {np} (`{ais}`).
     pub fn {vip}(&self) -> impl Iterator<Item=&str> {{
         self.strings_of(&{ai})
@@ -151,7 +151,7 @@ impl Tag {{
     }}
 
     /// Returns all {np} formatted in an easily readable way.
-    fn format_{vip}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
+    pub(crate) fn format_{vip}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
         if self.{vip}().count() > 1 {{
             writeln!(f, \"{np}:\")?;
             for s in self.{vip}() {{
@@ -183,7 +183,7 @@ pub fn flag_value_accessor(input: TokenStream) -> TokenStream {
     format!(
         "
 /// ### {hl}
-impl Tag {{
+impl Userdata {{
     /// Returns the {n} flag (`{ais}`).
     pub fn {vi}(&self) -> bool {{
         let vec = match self.bytes_of(&{ai}).next() {{
@@ -204,7 +204,7 @@ impl Tag {{
     }}
 
     /// Returns the {n} formatted in an easily readable way.
-    fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
+    pub(crate) fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
         match self.{vi}() {{
             true => writeln!(f, \"{n}\"),
             false => Ok(()),
@@ -229,7 +229,7 @@ pub fn u16_value_accessor(input: TokenStream) -> TokenStream {
     format!(
         "
 /// ### {hl}
-impl Tag {{
+impl Userdata {{
     /// Returns the {n} (`{ais}`)
     pub fn {vi}(&self) -> Option<u16> {{
         let vec = self.bytes_of(&{ai}).next()?;
@@ -248,7 +248,7 @@ impl Tag {{
     }}
 
     /// Returns the {n} formatted in an easily readable way.
-    fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
+    pub(crate) fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
         match self.{vi}() {{
             Some(s) => writeln!(f, \"{n}: {{}}\", s),
             None => Ok(()),
@@ -273,7 +273,7 @@ pub fn u32_value_accessor(input: TokenStream) -> TokenStream {
     format!(
         "
 /// ### {hl}
-impl Tag {{
+impl Userdata {{
     /// Returns the {n} (`{ais}`)
     pub fn {vi}(&self) -> Option<u32> {{
         let vec = self.bytes_of(&{ai}).next()?;
@@ -292,7 +292,7 @@ impl Tag {{
     }}
 
     /// Returns the {n} formatted in an easily readable way.
-    fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
+    pub(crate) fn format_{vi}(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{
         match self.{vi}() {{
             Some(s) => writeln!(f, \"{n}: {{}}\", s),
             None => Ok(()),
@@ -308,4 +308,54 @@ impl Tag {{
     )
     .parse()
     .expect("Error parsing accessor impl block:")
+}
+
+#[proc_macro]
+pub fn atom_ref(input: TokenStream) -> TokenStream {
+    let mut declaration = String::new();
+    let mut write = String::new();
+    let mut len = String::new();
+
+    for i in input.to_string().split(',').filter(|s| !s.is_empty()) {
+        match i.split_once('<') {
+            Some((ident, lifetime)) => {
+                declaration.push_str(&format!("{0}(&'a {0}<{1}),", ident, lifetime));
+                write.push_str(&format!("Self::{}(a) => a.write(writer),", ident));
+                len.push_str(&format!("Self::{}(a) => a.len(),", ident));
+            }
+            None => {
+                declaration.push_str(&format!("{0}(&'a {0}),", i));
+                write.push_str(&format!("Self::{}(a) => a.write(writer),", i));
+                len.push_str(&format!("Self::{}(a) => a.len(),", i));
+            }
+        }
+    }
+
+    format!(
+        "
+#[derive(Debug)]
+pub enum AtomRef<'a> {{
+    {decl}
+}}
+
+impl AtomRef<'_> {{
+    pub fn write(&self, writer: &mut impl Write) -> crate::Result<()> {{
+        match self {{
+            {write}
+        }}
+    }}
+
+    fn len(&self) -> u64 {{
+        match self {{
+            {len}
+        }}
+    }}
+}}
+    ",
+        decl = declaration,
+        write = write,
+        len = len,
+    )
+    .parse()
+    .expect("Error parsing atom ref block:")
 }

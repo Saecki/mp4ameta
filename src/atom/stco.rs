@@ -1,11 +1,9 @@
-use std::io::{Read, Seek};
-
 use super::*;
 
 /// A struct representing of a sample table chunk offset atom (`stco`).
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Stco {
-    pub table_pos: u64,
+    pub state: State,
     pub offsets: Vec<u32>,
 }
 
@@ -14,54 +12,77 @@ impl Atom for Stco {
 }
 
 impl ParseAtom for Stco {
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self> {
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        _cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Self> {
+        let bounds = find_bounds(reader, size)?;
         let (version, _) = parse_full_head(reader)?;
 
-        match version {
-            0 => {
-                let entries = reader.read_u32()?;
-                if 8 + 4 * entries as u64 != size.content_len() {
-                    return Err(crate::Error::new(
-                        crate::ErrorKind::Parsing,
-                        "Sample table chunk offset (stco) offset table size doesn't match atom length".to_owned(),
-                    ));
-                }
-
-                let table_pos = reader.stream_position()?;
-                let mut offsets = Vec::with_capacity(entries as usize);
-                for _ in 0..entries {
-                    let offset = reader.read_u32()?;
-                    offsets.push(offset);
-                }
-
-                Ok(Self { table_pos, offsets })
-            }
-            _ => Err(crate::Error::new(
+        if version != 0 {
+            return Err(crate::Error::new(
                 crate::ErrorKind::UnknownVersion(version),
-                "Unknown sample table chunk offset (stco) version".to_owned(),
-            )),
+                "Unknown sample table chunk offset (stco) version",
+            ));
         }
+
+        let entries = reader.read_be_u32()?;
+        if 8 + 4 * entries as u64 != size.content_len() {
+            return Err(crate::Error::new(
+                crate::ErrorKind::Parsing,
+                "Sample table chunk offset (stco) table size doesn't match atom length",
+            ));
+        }
+
+        let mut offsets = Vec::with_capacity(entries as usize);
+        for _ in 0..entries {
+            let offset = reader.read_be_u32()?;
+            offsets.push(offset);
+        }
+
+        Ok(Self { state: State::Existing(bounds), offsets })
     }
 }
 
-pub struct StcoBounds {
-    pub bounds: AtomBounds,
-}
+impl WriteAtom for Stco {
+    fn write_atom(&self, writer: &mut impl Write) -> crate::Result<()> {
+        self.write_head(writer)?;
+        write_full_head(writer, 0, [0; 3])?;
 
-impl Deref for StcoBounds {
-    type Target = AtomBounds;
+        writer.write_be_u32(self.offsets.len() as u32)?;
+        for o in self.offsets.iter() {
+            writer.write_be_u32(*o)?;
+        }
 
-    fn deref(&self) -> &Self::Target {
-        &self.bounds
+        Ok(())
+    }
+
+    fn size(&self) -> Size {
+        let content_len = 8 + 4 * self.offsets.len() as u64;
+        Size::from(content_len)
     }
 }
 
-impl FindAtom for Stco {
-    type Bounds = StcoBounds;
+impl SimpleCollectChanges for Stco {
+    fn state(&self) -> &State {
+        &self.state
+    }
 
-    fn find_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self::Bounds> {
-        let bounds = find_bounds(reader, size)?;
-        seek_to_end(reader, &bounds)?;
-        Ok(Self::Bounds { bounds })
+    fn existing<'a>(
+        &'a self,
+        _level: u8,
+        bounds: &'a AtomBounds,
+        changes: &mut Vec<Change<'a>>,
+    ) -> i64 {
+        changes.push(Change::UpdateChunkOffset(UpdateChunkOffsets {
+            bounds,
+            offsets: ChunkOffsets::Stco(&self.offsets),
+        }));
+        0
+    }
+
+    fn atom_ref(&self) -> AtomRef<'_> {
+        AtomRef::Stco(self)
     }
 }

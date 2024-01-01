@@ -1,7 +1,13 @@
 use super::*;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Ilst<'a> {
+pub struct Ilst<'a> {
+    pub state: State,
+    pub data: IlstData<'a>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IlstData<'a> {
     Owned(Vec<MetaItem>),
     Borrowed(&'a [MetaItem]),
 }
@@ -10,9 +16,9 @@ impl Deref for Ilst<'_> {
     type Target = [MetaItem];
 
     fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Owned(a) => a,
-            Self::Borrowed(a) => a,
+        match &self.data {
+            IlstData::Owned(a) => a,
+            IlstData::Borrowed(a) => a,
         }
     }
 }
@@ -22,7 +28,12 @@ impl Atom for Ilst<'_> {
 }
 
 impl ParseAtom for Ilst<'_> {
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self> {
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Self> {
+        let bounds = find_bounds(reader, size)?;
         let mut ilst = Vec::<MetaItem>::new();
         let mut parsed_bytes = 0;
 
@@ -30,11 +41,9 @@ impl ParseAtom for Ilst<'_> {
             let head = parse_head(reader)?;
 
             match head.fourcc() {
-                FREE => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
-                }
+                FREE => reader.skip(head.content_len() as i64)?,
                 _ => {
-                    let atom = MetaItem::parse(reader, head.fourcc(), head.content_len())?;
+                    let atom = MetaItem::parse(reader, cfg, head)?;
                     let other = ilst.iter_mut().find(|o| atom.ident == o.ident);
 
                     match other {
@@ -47,7 +56,10 @@ impl ParseAtom for Ilst<'_> {
             parsed_bytes += head.len();
         }
 
-        Ok(Self::Owned(ilst))
+        Ok(Self {
+            state: State::Existing(bounds),
+            data: IlstData::Owned(ilst),
+        })
     }
 }
 
@@ -66,33 +78,30 @@ impl WriteAtom for Ilst<'_> {
     }
 }
 
+impl SimpleCollectChanges for Ilst<'_> {
+    fn state(&self) -> &State {
+        &self.state
+    }
+
+    fn existing<'a>(
+        &'a self,
+        _level: u8,
+        _bounds: &AtomBounds,
+        _changes: &mut Vec<Change<'a>>,
+    ) -> i64 {
+        0
+    }
+
+    fn atom_ref(&self) -> AtomRef<'_> {
+        AtomRef::Ilst(self)
+    }
+}
+
 impl Ilst<'_> {
     pub fn owned(self) -> Option<Vec<MetaItem>> {
-        match self {
-            Self::Owned(a) => Some(a),
-            Self::Borrowed(_) => None,
+        match self.data {
+            IlstData::Owned(a) => Some(a),
+            IlstData::Borrowed(_) => None,
         }
-    }
-}
-
-pub struct IlstBounds {
-    pub bounds: AtomBounds,
-}
-
-impl Deref for IlstBounds {
-    type Target = AtomBounds;
-
-    fn deref(&self) -> &Self::Target {
-        &self.bounds
-    }
-}
-
-impl FindAtom for Ilst<'_> {
-    type Bounds = IlstBounds;
-
-    fn find_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self::Bounds> {
-        let bounds = find_bounds(reader, size)?;
-        seek_to_end(reader, &bounds)?;
-        Ok(Self::Bounds { bounds })
     }
 }

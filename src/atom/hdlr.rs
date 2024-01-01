@@ -1,19 +1,22 @@
 use super::*;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Hdlr(pub Vec<u8>);
+pub struct Hdlr {
+    pub state: State,
+    pub data: Vec<u8>,
+}
 
 impl Deref for Hdlr {
     type Target = Vec<u8>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.data
     }
 }
 
 impl DerefMut for Hdlr {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.data
     }
 }
 
@@ -22,8 +25,16 @@ impl Atom for Hdlr {
 }
 
 impl ParseAtom for Hdlr {
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self> {
-        Ok(Self(reader.read_u8_vec(size.content_len())?))
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        _cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Self> {
+        let bounds = find_bounds(reader, size)?;
+        Ok(Self {
+            state: State::Existing(bounds),
+            data: reader.read_u8_vec(size.content_len())?,
+        })
     }
 }
 
@@ -35,28 +46,72 @@ impl WriteAtom for Hdlr {
     }
 
     fn size(&self) -> Size {
-        Size::from(self.0.len() as u64)
+        Size::from(self.data.len() as u64)
     }
 }
 
-pub struct HdlrBounds {
-    pub bounds: AtomBounds,
-}
+impl SimpleCollectChanges for Hdlr {
+    fn state(&self) -> &State {
+        &self.state
+    }
 
-impl Deref for HdlrBounds {
-    type Target = AtomBounds;
+    fn existing<'a>(
+        &'a self,
+        _level: u8,
+        _bounds: &AtomBounds,
+        _changes: &mut Vec<Change<'a>>,
+    ) -> i64 {
+        0
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.bounds
+    fn atom_ref(&self) -> AtomRef<'_> {
+        AtomRef::Hdlr(self)
     }
 }
 
-impl FindAtom for Hdlr {
-    type Bounds = HdlrBounds;
+impl Hdlr {
+    pub fn meta() -> Self {
+        Self {
+            state: State::Insert,
+            data: vec![
+                0x00, 0x00, 0x00, 0x00, // version + flags
+                0x00, 0x00, 0x00, 0x00, // component type
+                0x6d, 0x64, 0x69, 0x72, // component subtype
+                0x61, 0x70, 0x70, 0x6c, // component manufacturer
+                0x00, 0x00, 0x00, 0x00, // component flags
+                0x00, 0x00, 0x00, 0x00, // component flags mask
+                0x00, // component name
+            ],
+        }
+    }
 
-    fn find_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self::Bounds> {
-        let bounds = find_bounds(reader, size)?;
-        seek_to_end(reader, &bounds)?;
-        Ok(Self::Bounds { bounds })
+    pub fn mp4a_mdia() -> Self {
+        Self {
+            state: State::Insert,
+            data: vec![
+                0x00, 0x00, 0x00, 0x00, // version + flags
+                0x00, 0x00, 0x00, 0x00, // component type
+                0x73, 0x6f, 0x75, 0x6e, // component subtype
+                0x00, 0x00, 0x00, 0x00, // component manufacturer
+                0x00, 0x00, 0x00, 0x00, // component flags
+                0x00, 0x00, 0x00, 0x00, // component flags mask
+                0x00, // component name
+            ],
+        }
+    }
+
+    pub fn text_mdia() -> Self {
+        Self {
+            state: State::Insert,
+            data: vec![
+                0x00, 0x00, 0x00, 0x00, // version + flags
+                0x00, 0x00, 0x00, 0x00, // component type
+                0x74, 0x65, 0x78, 0x74, // component subtype
+                0x00, 0x00, 0x00, 0x00, // component manufacturer
+                0x00, 0x00, 0x00, 0x00, // component flags
+                0x00, 0x00, 0x00, 0x00, // component flags mask
+                0x00, // component name
+            ],
+        }
     }
 }

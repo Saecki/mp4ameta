@@ -124,10 +124,7 @@ impl TryFrom<u8> for MediaType {
             SHORT_FILM => Ok(Self::ShortFilm),
             TV_SHOW => Ok(Self::TvShow),
             BOOKLET => Ok(Self::Booklet),
-            _ => Err(Self::Error::new(
-                ErrorKind::UnknownMediaType(value),
-                "Unknown media type".to_owned(),
-            )),
+            _ => Err(Self::Error::new(ErrorKind::UnknownMediaType(value), "Unknown media type")),
         }
     }
 }
@@ -154,8 +151,7 @@ pub enum AdvisoryRating {
     Clean,
     /// An advisory rating stored as 0 in the `rtng` atom.
     Inoffensive,
-    /// An advisory rating indicated by any other value than 0 or 2 in the `rtng` atom, containing
-    /// the value.
+    /// An advisory rating indicated by any other value than 0 or 2 in the `rtng` atom.
     Explicit,
 }
 
@@ -193,19 +189,19 @@ impl fmt::Display for AdvisoryRating {
 /// An enum representing the channel configuration of an MPEG-4 audio track.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChannelConfig {
-    /// Mono
+    /// 1.0, channel: front-center.
     Mono,
-    /// Stereo
+    /// 2.0, channels: front-left, front-right.
     Stereo,
-    /// 3.0
+    /// 3.0, channels: front-center, front-left, front-right.
     Three,
-    /// 4.0
+    /// 4.0, channels: front-center, front-left, front-right, back-center.
     Four,
-    /// 5.0
+    /// 5.0, channels: front-center, front-left, front-right, back-left, back-right.
     Five,
-    /// 5.1
+    /// 5.1, channels: front-center, front-left, front-right, back-left, back-right, LFE-channel.
     FiveOne,
-    /// 7.1
+    /// 7.1, channels: front-center, front-left, front-right, side-left, side-right, back-left, back-right, LFE-channel.
     SevenOne,
 }
 
@@ -223,7 +219,7 @@ impl TryFrom<u8> for ChannelConfig {
             SEVEN_ONE => Ok(Self::SevenOne),
             _ => Err(Self::Error::new(
                 crate::ErrorKind::UnknownChannelConfig(value),
-                "Unknown channel config index".to_owned(),
+                "Unknown channel config index",
             )),
         }
     }
@@ -308,8 +304,8 @@ impl TryFrom<u8> for SampleRate {
             HZ_8000 => Ok(Self::Hz8000),
             HZ_7350 => Ok(Self::Hz7350),
             _ => Err(Self::Error::new(
-                crate::ErrorKind::UnknownChannelConfig(value),
-                "Unknown sample rate index".to_owned(),
+                crate::ErrorKind::UnknownSampleRate(value),
+                "Unknown sample rate index",
             )),
         }
     }
@@ -346,7 +342,7 @@ impl SampleRate {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AudioInfo {
     /// The duration of the track.
-    pub duration: Option<Duration>,
+    pub duration: Duration,
     /// The channel configuration of the track.
     pub channel_config: Option<ChannelConfig>,
     /// The sample rate of the track.
@@ -420,5 +416,21 @@ impl ImgFmt {
     /// Returns true if `self` is of type [`Self::Png`] false otherwise.
     pub fn is_png(&self) -> bool {
         matches!(self, Self::Png)
+    }
+}
+
+/// A struct representing a chapter.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Chapter {
+    /// The start of the chapter.
+    pub start: Duration,
+    /// The title of the chapter.
+    pub title: String,
+}
+
+impl Chapter {
+    /// Creates a new chapter.
+    pub fn new(start: Duration, title: impl Into<String>) -> Self {
+        Self { start, title: title.into() }
     }
 }

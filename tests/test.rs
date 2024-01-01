@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use mp4ameta::{
-    AdvisoryRating, ChannelConfig, Data, Fourcc, Img, MediaType, SampleRate, Tag, STANDARD_GENRES,
+    AdvisoryRating, ChannelConfig, Chapter, Data, Fourcc, Img, MediaType, SampleRate, Tag,
+    WriteChapters, WriteConfig, STANDARD_GENRES,
 };
 use walkdir::WalkDir;
 
@@ -94,6 +95,11 @@ fn get_tag_2() -> Tag {
     tag.set_artwork(Img::jpeg(b"NEW ARTWORK".to_vec()));
     tag.set_isrc("NEW ISRC");
     tag.set_lyricist("NEW LYRICIST");
+
+    tag.add_chapter(Chapter::new(Duration::ZERO, "CHAPTER 1"));
+    tag.add_chapter(Chapter::new(Duration::new(234, 324_000_000), "CHAPTER 2"));
+    tag.add_chapter(Chapter::new(Duration::new(553, 946_000_000), "CHAPTER 3"));
+
     tag
 }
 
@@ -159,6 +165,12 @@ fn assert_tag_2(tag: &Tag) {
     assert_eq!(tag.artwork(), Some(Img::jpeg(&b"NEW ARTWORK"[..])));
     assert_eq!(tag.isrc(), Some("NEW ISRC"));
     assert_eq!(tag.lyricist(), Some("NEW LYRICIST"));
+
+    let mut chapters = tag.chapters();
+    assert_eq!(chapters.next(), Some(&Chapter::new(Duration::ZERO, "CHAPTER 1")));
+    assert_eq!(chapters.next(), Some(&Chapter::new(Duration::new(234, 324_000_000), "CHAPTER 2")));
+    assert_eq!(chapters.next(), Some(&Chapter::new(Duration::new(553, 946_000_000), "CHAPTER 3")));
+    assert_eq!(chapters.next(), None);
 }
 
 fn assert_tag_3(tag: &Tag) {
@@ -214,7 +226,7 @@ fn assert_tag_3(tag: &Tag) {
 }
 
 fn assert_readonly(tag: &Tag) {
-    assert_eq!(tag.duration(), Some(Duration::from_millis(486)));
+    assert_eq!(tag.duration(), Duration::from_millis(486));
     assert_eq!(tag.filetype(), "M4A \u{0}\u{0}\u{2}\u{0}isomiso2");
     assert_eq!(tag.channel_config(), Some(ChannelConfig::Mono));
     assert_eq!(tag.sample_rate(), Some(SampleRate::Hz44100));
@@ -382,6 +394,64 @@ fn dump_2() {
 }
 
 #[test]
+fn dump_chapter_list() {
+    let mut tag = Tag::default();
+    let chapters = [
+        Chapter::new(Duration::ZERO, "CHAPTER 1"),
+        Chapter::new(Duration::new(234, 324_000_000), "CHAPTER 2"),
+        Chapter::new(Duration::new(553, 946_000_000), "CHAPTER 3"),
+    ];
+
+    tag.add_all_chapters(chapters.clone());
+
+    let _ = std::fs::remove_file("target/dump_chapter_list.m4a");
+    println!("dumping to target/dump_chapter_list.m4a...");
+    let cfg = WriteConfig {
+        write_chapters: WriteChapters::List,
+        ..Default::default()
+    };
+    tag.dump_with_path("target/dump_chapter_list.m4a", &cfg).unwrap();
+
+    println!("reading target/dump_chapter_list.m4a...");
+    let tag = Tag::read_from_path("target/dump_chapter_list.m4a").unwrap();
+
+    let mut chapters_iter = tag.chapters();
+    assert_eq!(chapters_iter.next(), Some(&chapters[0]));
+    assert_eq!(chapters_iter.next(), Some(&chapters[1]));
+    assert_eq!(chapters_iter.next(), Some(&chapters[2]));
+    assert_eq!(chapters_iter.next(), None);
+}
+
+#[test]
+fn dump_chapter_track() {
+    let mut tag = Tag::default();
+    let chapters = [
+        Chapter::new(Duration::ZERO, "CHAPTER 1"),
+        Chapter::new(Duration::new(234, 324_000_000), "CHAPTER 2"),
+        Chapter::new(Duration::new(553, 946_000_000), "CHAPTER 3"),
+    ];
+
+    tag.add_all_chapters(chapters.clone());
+
+    let _ = std::fs::remove_file("target/dump_chapter_track.m4a");
+    println!("dumping to target/dump_chapter_track.m4a...");
+    let cfg = WriteConfig {
+        write_chapters: WriteChapters::Track,
+        ..Default::default()
+    };
+    tag.dump_with_path("target/dump_chapter_track.m4a", &cfg).unwrap();
+
+    println!("reading target/dump_chapter_track.m4a...");
+    let tag = Tag::read_from_path("target/dump_chapter_track.m4a").unwrap();
+
+    let mut chapters_iter = tag.chapters();
+    assert_eq!(chapters_iter.next(), Some(&chapters[0]));
+    assert_eq!(chapters_iter.next(), Some(&chapters[1]));
+    assert_eq!(chapters_iter.next(), Some(&chapters[2]));
+    assert_eq!(chapters_iter.next(), None);
+}
+
+#[test]
 fn multiple_values() {
     let mut tag = Tag::default();
 
@@ -535,8 +605,8 @@ fn track_disc_handling() {
 #[test]
 fn work_movement_handling() {
     let movement = "TEST MOVEMENT";
-    let index = 1u16;
-    let count = 8u16;
+    let index = 1;
+    let count = 8;
     let work = "TEST WORK";
 
     let mut tag = Tag::default();
@@ -557,6 +627,36 @@ fn work_movement_handling() {
     assert_eq!(tag.movement_index(), Some(index));
     assert_eq!(tag.show_movement(), true);
     assert_eq!(tag.work(), Some(work));
+}
+
+#[test]
+fn chapter_handling() {
+    let chapter1 = Chapter::new(Duration::from_secs(0), "CHAPTER 1");
+    let chapter2 = Chapter::new(Duration::from_secs(1), "CHAPTER 2");
+    let chapter3 = Chapter::new(Duration::from_secs(2), "CHAPTER 3");
+
+    let mut tag = Tag::default();
+    assert_eq!(tag.chapters().next(), None);
+
+    tag.add_chapter(chapter2.clone());
+    let mut chapters = tag.chapters();
+    assert_eq!(chapters.next(), Some(&chapter2));
+    assert_eq!(chapters.next(), None);
+    drop(chapters);
+
+    tag.add_chapter(chapter1.clone());
+    let mut chapters = tag.chapters();
+    assert_eq!(chapters.next(), Some(&chapter1));
+    assert_eq!(chapters.next(), Some(&chapter2));
+    assert_eq!(chapters.next(), None);
+    drop(chapters);
+
+    tag.add_chapter(chapter3.clone());
+    let mut chapters = tag.chapters();
+    assert_eq!(chapters.next(), Some(&chapter1));
+    assert_eq!(chapters.next(), Some(&chapter2));
+    assert_eq!(chapters.next(), Some(&chapter3));
+    assert_eq!(chapters.next(), None);
 }
 
 #[test]

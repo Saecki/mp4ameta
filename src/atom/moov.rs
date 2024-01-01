@@ -2,7 +2,8 @@ use super::*;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Moov<'a> {
-    pub mvhd: Option<Mvhd>,
+    pub state: State,
+    pub mvhd: Mvhd,
     pub trak: Vec<Trak>,
     pub udta: Option<Udta<'a>>,
 }
@@ -12,24 +13,42 @@ impl Atom for Moov<'_> {
 }
 
 impl ParseAtom for Moov<'_> {
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self> {
-        let mut moov = Self::default();
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Self> {
+        let bounds = find_bounds(reader, size)?;
         let mut parsed_bytes = 0;
+        let mut mvhd = None;
+        let mut trak = Vec::new();
+        let mut udta = None;
 
         while parsed_bytes < size.content_len() {
             let head = parse_head(reader)?;
 
             match head.fourcc() {
-                MOVIE_HEADER => moov.mvhd = Some(Mvhd::parse(reader, head.size())?),
-                TRACK => moov.trak.push(Trak::parse(reader, head.size())?),
-                USER_DATA => moov.udta = Some(Udta::parse(reader, head.size())?),
-                _ => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
+                MOVIE_HEADER => mvhd = Some(Mvhd::parse(reader, cfg, head.size())?),
+                TRACK if cfg.read_chapters || cfg.read_audio_info => {
+                    trak.push(Trak::parse(reader, cfg, head.size())?)
                 }
+                USER_DATA if cfg.read_item_list || cfg.read_chapters => {
+                    udta = Some(Udta::parse(reader, cfg, head.size())?)
+                }
+                _ => reader.skip(head.content_len() as i64)?,
             }
 
             parsed_bytes += head.len();
         }
+
+        let mvhd = mvhd.ok_or_else(|| {
+            crate::Error::new(
+                ErrorKind::AtomNotFound(MOVIE_HEADER),
+                "Missing necessary data, no movie header (mvhd) atom found",
+            )
+        })?;
+
+        let moov = Self { state: State::Existing(bounds), mvhd, trak, udta };
 
         Ok(moov)
     }
@@ -38,6 +57,10 @@ impl ParseAtom for Moov<'_> {
 impl WriteAtom for Moov<'_> {
     fn write_atom(&self, writer: &mut impl Write) -> crate::Result<()> {
         self.write_head(writer)?;
+        self.mvhd.write(writer)?;
+        for t in self.trak.iter() {
+            t.write(writer)?;
+        }
         if let Some(a) = &self.udta {
             a.write(writer)?;
         }
@@ -45,47 +68,29 @@ impl WriteAtom for Moov<'_> {
     }
 
     fn size(&self) -> Size {
-        Size::from(self.udta.len_or_zero())
+        let content_len = self.mvhd.len()
+            + self.trak.iter().map(Trak::len).sum::<u64>()
+            + self.udta.len_or_zero();
+        Size::from(content_len)
     }
 }
 
-pub struct MoovBounds {
-    pub bounds: AtomBounds,
-    pub trak: Vec<TrakBounds>,
-    pub udta: Option<UdtaBounds>,
-}
-
-impl Deref for MoovBounds {
-    type Target = AtomBounds;
-
-    fn deref(&self) -> &Self::Target {
-        &self.bounds
+impl SimpleCollectChanges for Moov<'_> {
+    fn state(&self) -> &State {
+        &self.state
     }
-}
 
-impl FindAtom for Moov<'_> {
-    type Bounds = MoovBounds;
+    fn existing<'a>(
+        &'a self,
+        level: u8,
+        bounds: &'a AtomBounds,
+        changes: &mut Vec<Change<'a>>,
+    ) -> i64 {
+        self.trak.iter().map(|a| a.collect_changes(bounds.end(), level, changes)).sum::<i64>()
+            + self.udta.collect_changes(bounds.end(), level, changes)
+    }
 
-    fn find_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self::Bounds> {
-        let bounds = find_bounds(reader, size)?;
-        let mut trak = Vec::new();
-        let mut udta = None;
-        let mut parsed_bytes = 0;
-
-        while parsed_bytes < size.content_len() {
-            let head = parse_head(reader)?;
-
-            match head.fourcc() {
-                TRACK => trak.push(Trak::find(reader, head.size())?),
-                USER_DATA => udta = Some(Udta::find(reader, head.size())?),
-                _ => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
-                }
-            }
-
-            parsed_bytes += head.len();
-        }
-
-        Ok(Self::Bounds { bounds, trak, udta })
+    fn atom_ref(&self) -> AtomRef<'_> {
+        AtomRef::Moov(self)
     }
 }

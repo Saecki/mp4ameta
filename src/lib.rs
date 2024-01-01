@@ -41,9 +41,12 @@
 //! ```
 #![deny(rust_2018_idioms)]
 
-pub use crate::atom::{ident, Data, DataIdent, Fourcc, FreeformIdent, Ident};
+pub use crate::atom::ident::*;
+pub use crate::atom::{
+    ident, ChplTimescale, Data, ReadConfig, WriteChapters, WriteConfig, READ_CONFIG, WRITE_CONFIG,
+};
 pub use crate::error::{Error, ErrorKind, Result};
-pub use crate::tag::{Tag, STANDARD_GENRES};
+pub use crate::tag::{Tag, Userdata, STANDARD_GENRES};
 pub use crate::types::*;
 
 pub(crate) use crate::atom::MetaItem;
@@ -53,3 +56,4 @@ mod atom;
 mod error;
 mod tag;
 mod types;
+mod util;

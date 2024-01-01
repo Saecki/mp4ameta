@@ -1,6 +1,6 @@
 use std::array::TryFromSliceError;
 use std::convert::TryInto;
-use std::fmt;
+use std::fmt::{self, Write};
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
@@ -14,24 +14,52 @@ pub(crate) const MOVIE: Fourcc = Fourcc(*b"moov");
 pub(crate) const MOVIE_HEADER: Fourcc = Fourcc(*b"mvhd");
 /// (`trak`) Identifier of an atom containing information about a single track.
 pub(crate) const TRACK: Fourcc = Fourcc(*b"trak");
+/// (`tkhd`)
+pub(crate) const TRACK_HEADER: Fourcc = Fourcc(*b"tkhd");
+/// (`tref`)
+pub(crate) const TRACK_REFERENCE: Fourcc = Fourcc(*b"tref");
+/// (`chap`)
+pub(crate) const CHAPTER: Fourcc = Fourcc(*b"chap");
 /// (`mdia`) Identifier of an atom containing information about a tracks media type and data.
 pub(crate) const MEDIA: Fourcc = Fourcc(*b"mdia");
+/// (`mdhd`)
+pub(crate) const MEDIA_HEADER: Fourcc = Fourcc(*b"mdhd");
 /// (`minf`)
 pub(crate) const MEDIA_INFORMATION: Fourcc = Fourcc(*b"minf");
+/// (`gmhd`)
+pub(crate) const BASE_MEDIA_INFORMATION_HEADER: Fourcc = Fourcc(*b"gmhd");
+/// (`gmin`)
+pub(crate) const BASE_MEDIA_INFORMATION: Fourcc = Fourcc(*b"gmin");
+/// (`dinf`)
+pub(crate) const DATA_INFORMATION: Fourcc = Fourcc(*b"dinf");
+/// (`dref`)
+pub(crate) const DATA_REFERENCE: Fourcc = Fourcc(*b"dref");
+/// (`url `)
+pub(crate) const URL_MEDIA: Fourcc = Fourcc(*b"url ");
 /// (`stbl`)
 pub(crate) const SAMPLE_TABLE: Fourcc = Fourcc(*b"stbl");
+/// (`stsz`)
+pub(crate) const SAMPLE_TABLE_SAMPLE_SIZE: Fourcc = Fourcc(*b"stsz");
+/// (`stsc`)
+pub(crate) const SAMPLE_TABLE_SAMPLE_TO_COUNT: Fourcc = Fourcc(*b"stsc");
 /// (`stco`)
 pub(crate) const SAMPLE_TABLE_CHUNK_OFFSET: Fourcc = Fourcc(*b"stco");
 /// (`co64`)
 pub(crate) const SAMPLE_TABLE_CHUNK_OFFSET_64: Fourcc = Fourcc(*b"co64");
+/// (`stts`)
+pub(crate) const SAMPLE_TABLE_TIME_TO_SAMPLE: Fourcc = Fourcc(*b"stts");
 /// (`stsd`)
 pub(crate) const SAMPLE_TABLE_SAMPLE_DESCRIPTION: Fourcc = Fourcc(*b"stsd");
 /// (`mp4a`)
 pub(crate) const MP4_AUDIO: Fourcc = Fourcc(*b"mp4a");
+/// (`text`)
+pub(crate) const TEXT_MEDIA: Fourcc = Fourcc(*b"text");
 /// (`esds`)
 pub(crate) const ELEMENTARY_STREAM_DESCRIPTION: Fourcc = Fourcc(*b"esds");
 /// (`udta`) Identifier of an atom containing user metadata.
 pub(crate) const USER_DATA: Fourcc = Fourcc(*b"udta");
+/// (`chpl`)
+pub(crate) const CHAPTER_LIST: Fourcc = Fourcc(*b"chpl");
 /// (`meta`) Identifier of an atom containing a metadata item list.
 pub(crate) const METADATA: Fourcc = Fourcc(*b"meta");
 /// (`hdlr`) Identifier of an atom specifying the handler component that should interpret the medias data.
@@ -212,13 +240,21 @@ impl FromStr for Fourcc {
 
 impl fmt::Debug for Fourcc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Fourcc({})", self.0.iter().map(|b| char::from(*b)).collect::<String>())
+        f.write_str("Fourcc(")?;
+        for c in self.0.iter().map(|b| char::from(*b)) {
+            f.write_char(c)?;
+        }
+        f.write_str(")")?;
+        Ok(())
     }
 }
 
 impl fmt::Display for Fourcc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.iter().map(|b| char::from(*b)).collect::<String>())
+        for c in self.0.iter().map(|b| char::from(*b)) {
+            f.write_char(c)?;
+        }
+        Ok(())
     }
 }
 

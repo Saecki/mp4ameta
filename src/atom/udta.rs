@@ -2,6 +2,8 @@ use super::*;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Udta<'a> {
+    pub state: State,
+    pub chpl: Option<Chpl<'a>>,
     pub meta: Option<Meta<'a>>,
 }
 
@@ -10,18 +12,29 @@ impl Atom for Udta<'_> {
 }
 
 impl ParseAtom for Udta<'_> {
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self> {
-        let mut udta = Self::default();
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Self> {
+        let bounds = find_bounds(reader, size)?;
+        let mut udta = Self {
+            state: State::Existing(bounds),
+            ..Default::default()
+        };
         let mut parsed_bytes = 0;
 
         while parsed_bytes < size.content_len() {
             let head = parse_head(reader)?;
 
             match head.fourcc() {
-                METADATA => udta.meta = Some(Meta::parse(reader, head.size())?),
-                _ => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
+                CHAPTER_LIST if cfg.read_chapters => {
+                    udta.chpl = Some(Chpl::parse(reader, cfg, head.size())?);
                 }
+                METADATA if cfg.read_item_list => {
+                    udta.meta = Some(Meta::parse(reader, cfg, head.size())?)
+                }
+                _ => reader.skip(head.content_len() as i64)?,
             }
 
             parsed_bytes += head.len();
@@ -34,6 +47,9 @@ impl ParseAtom for Udta<'_> {
 impl WriteAtom for Udta<'_> {
     fn write_atom(&self, writer: &mut impl Write) -> crate::Result<()> {
         self.write_head(writer)?;
+        if let Some(a) = &self.chpl {
+            a.write(writer)?;
+        }
         if let Some(a) = &self.meta {
             a.write(writer)?;
         }
@@ -41,44 +57,27 @@ impl WriteAtom for Udta<'_> {
     }
 
     fn size(&self) -> Size {
-        Size::from(self.meta.len_or_zero())
+        let content_len = self.meta.len_or_zero() + self.chpl.len_or_zero();
+        Size::from(content_len)
     }
 }
 
-pub struct UdtaBounds {
-    pub bounds: AtomBounds,
-    pub meta: Option<MetaBounds>,
-}
-
-impl Deref for UdtaBounds {
-    type Target = AtomBounds;
-
-    fn deref(&self) -> &Self::Target {
-        &self.bounds
+impl SimpleCollectChanges for Udta<'_> {
+    fn state(&self) -> &State {
+        &self.state
     }
-}
 
-impl FindAtom for Udta<'_> {
-    type Bounds = UdtaBounds;
+    fn existing<'a>(
+        &'a self,
+        level: u8,
+        bounds: &AtomBounds,
+        changes: &mut Vec<Change<'a>>,
+    ) -> i64 {
+        self.chpl.collect_changes(bounds.end(), level, changes)
+            + self.meta.collect_changes(bounds.end(), level, changes)
+    }
 
-    fn find_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self::Bounds> {
-        let bounds = find_bounds(reader, size)?;
-        let mut meta = None;
-        let mut parsed_bytes = 0;
-
-        while parsed_bytes < size.content_len() {
-            let head = parse_head(reader)?;
-
-            match head.fourcc() {
-                METADATA => meta = Some(Meta::find(reader, head.size())?),
-                _ => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
-                }
-            }
-
-            parsed_bytes += head.len();
-        }
-
-        Ok(Self::Bounds { bounds, meta })
+    fn atom_ref(&self) -> AtomRef<'_> {
+        AtomRef::Udta(self)
     }
 }

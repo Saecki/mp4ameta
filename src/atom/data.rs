@@ -48,7 +48,8 @@ const BE_I16: u32 = 66;
 #[allow(unused)]
 const BE_I32: u32 = 67;
 /// A block of data representing a two dimensional (2D) point with 32-bit big-endian floating point
-/// x and y coordinates. It has the structure:<br/> `{ BE_F32 x; BE_F32 y; }`
+/// x and y coordinates. It has the structure:<br/>
+/// `{ BE_F32 x; BE_F32 y; }`
 #[allow(unused)]
 const BE_POINT_F32: u32 = 70;
 /// A block of data representing 2D dimensions with 32-bit big-endian floating point width and
@@ -144,33 +145,34 @@ impl Atom for Data {
 
 impl ParseAtom for Data {
     /// Parses data based on [Table 3-5 Well-known data types](https://developer.apple.com/library/archive/documentation/QuickTime/QTFF/Metadata/Metadata.html#//apple_ref/doc/uid/TP40000939-CH1-SW34).
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Data> {
-        let (version, flags) = parse_full_head(reader)?;
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Data> {
+        let (version, [b2, b1, b0]) = parse_full_head(reader)?;
         if version != 0 {
             return Err(crate::Error::new(
                 crate::ErrorKind::UnknownVersion(version),
-                "Error reading data atom (data)".to_owned(),
+                "Unknown data atom (data) version",
             ));
         }
-        let [b2, b1, b0] = flags;
         let datatype = u32::from_be_bytes([0, b2, b1, b0]);
 
-        // Skipping 4 byte locale indicator
-        reader.seek(SeekFrom::Current(4))?;
+        reader.skip(4)?; // locale indicator
 
-        let data_len = size.content_len() - 8;
-
+        let len = size.content_len() - 8;
         Ok(match datatype {
-            RESERVED => Data::Reserved(reader.read_u8_vec(data_len)?),
-            UTF8 => Data::Utf8(reader.read_utf8(data_len)?),
-            UTF16 => Data::Utf16(reader.read_utf16(data_len)?),
-            JPEG => Data::Jpeg(reader.read_u8_vec(data_len)?),
-            PNG => Data::Png(reader.read_u8_vec(data_len)?),
-            BE_SIGNED => Data::BeSigned(reader.read_u8_vec(data_len)?),
-            BMP => Data::Bmp(reader.read_u8_vec(data_len)?),
+            RESERVED => Data::Reserved(reader.read_u8_vec(len)?),
+            UTF8 => Data::Utf8(reader.read_utf8(len)?),
+            UTF16 => Data::Utf16(reader.read_be_utf16(len)?),
+            JPEG => Data::Jpeg(read_image(reader, cfg.read_image_data, len)?),
+            PNG => Data::Png(read_image(reader, cfg.read_image_data, len)?),
+            BE_SIGNED => Data::BeSigned(reader.read_u8_vec(len)?),
+            BMP => Data::Bmp(read_image(reader, cfg.read_image_data, len)?),
             _ => {
-                // TODO: maybe log warning
-                Data::Unknown { code: datatype, data: reader.read_u8_vec(data_len)? }
+                // TODO: maybe log warning (optional log dependency behind feature flag)
+                Data::Unknown { code: datatype, data: reader.read_u8_vec(len)? }
             }
         })
     }
@@ -192,17 +194,11 @@ impl WriteAtom for Data {
         };
 
         writer.write_all(&datatype.to_be_bytes())?;
-        // Writing 4 byte locale indicator
-        writer.write_all(&[0; 4])?;
-
+        writer.write_all(&[0; 4])?; // locale indicator
         match self {
             Self::Reserved(v) => writer.write_all(v)?,
-            Self::Utf8(s) => writer.write_all(s.as_bytes())?,
-            Self::Utf16(s) => {
-                for c in s.encode_utf16() {
-                    writer.write_all(&c.to_be_bytes())?;
-                }
-            }
+            Self::Utf8(s) => writer.write_utf8(s)?,
+            Self::Utf16(s) => writer.write_be_utf16(s)?,
             Self::Jpeg(v) => writer.write_all(v)?,
             Self::Png(v) => writer.write_all(v)?,
             Self::BeSigned(v) => writer.write_all(v)?,
@@ -453,5 +449,14 @@ impl Data {
             Self::Bmp(v) => Some(v),
             _ => None,
         }
+    }
+}
+
+fn read_image(reader: &mut (impl Read + Seek), parse: bool, len: u64) -> crate::Result<Vec<u8>> {
+    if parse {
+        Ok(reader.read_u8_vec(len)?)
+    } else {
+        reader.skip(len as i64)?;
+        Ok(Vec::new())
     }
 }

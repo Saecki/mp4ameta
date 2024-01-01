@@ -2,6 +2,9 @@ use super::*;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Minf {
+    pub state: State,
+    pub gmhd: Option<Gmhd>,
+    pub dinf: Option<Dinf>,
     pub stbl: Option<Stbl>,
 }
 
@@ -10,18 +13,28 @@ impl Atom for Minf {
 }
 
 impl ParseAtom for Minf {
-    fn parse_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self> {
-        let mut minf = Self::default();
+    fn parse_atom(
+        reader: &mut (impl Read + Seek),
+        cfg: &ReadConfig,
+        size: Size,
+    ) -> crate::Result<Self> {
+        let bounds = find_bounds(reader, size)?;
+        let mut minf = Self {
+            state: State::Existing(bounds),
+            ..Default::default()
+        };
         let mut parsed_bytes = 0;
 
         while parsed_bytes < size.content_len() {
             let head = parse_head(reader)?;
 
             match head.fourcc() {
-                SAMPLE_TABLE => minf.stbl = Some(Stbl::parse(reader, head.size())?),
-                _ => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
+                BASE_MEDIA_INFORMATION_HEADER => {
+                    minf.gmhd = Some(Gmhd::parse(reader, cfg, head.size())?)
                 }
+                DATA_INFORMATION => minf.dinf = Some(Dinf::parse(reader, cfg, head.size())?),
+                SAMPLE_TABLE => minf.stbl = Some(Stbl::parse(reader, cfg, head.size())?),
+                _ => reader.skip(head.content_len() as i64)?,
             }
 
             parsed_bytes += head.len();
@@ -31,32 +44,43 @@ impl ParseAtom for Minf {
     }
 }
 
-pub struct MinfBounds {
-    pub bounds: AtomBounds,
-    pub stbl: Option<StblBounds>,
+impl WriteAtom for Minf {
+    fn write_atom(&self, writer: &mut impl Write) -> crate::Result<()> {
+        self.write_head(writer)?;
+        if let Some(a) = &self.gmhd {
+            a.write(writer)?;
+        }
+        if let Some(a) = &self.dinf {
+            a.write(writer)?;
+        }
+        if let Some(a) = &self.stbl {
+            a.write(writer)?;
+        }
+        Ok(())
+    }
+
+    fn size(&self) -> Size {
+        let content_len =
+            self.gmhd.len_or_zero() + self.dinf.len_or_zero() + self.stbl.len_or_zero();
+        Size::from(content_len)
+    }
 }
 
-impl FindAtom for Minf {
-    type Bounds = MinfBounds;
+impl SimpleCollectChanges for Minf {
+    fn state(&self) -> &State {
+        &self.state
+    }
 
-    fn find_atom(reader: &mut (impl Read + Seek), size: Size) -> crate::Result<Self::Bounds> {
-        let bounds = find_bounds(reader, size)?;
-        let mut stbl = None;
-        let mut parsed_bytes = 0;
+    fn existing<'a>(
+        &'a self,
+        level: u8,
+        bounds: &'a AtomBounds,
+        changes: &mut Vec<Change<'a>>,
+    ) -> i64 {
+        self.stbl.collect_changes(bounds.end(), level, changes)
+    }
 
-        while parsed_bytes < size.content_len() {
-            let head = parse_head(reader)?;
-
-            match head.fourcc() {
-                SAMPLE_TABLE => stbl = Some(Stbl::find(reader, head.size())?),
-                _ => {
-                    reader.seek(SeekFrom::Current(head.content_len() as i64))?;
-                }
-            }
-
-            parsed_bytes += head.len();
-        }
-
-        Ok(Self::Bounds { bounds, stbl })
+    fn atom_ref(&self) -> AtomRef<'_> {
+        AtomRef::Minf(self)
     }
 }
